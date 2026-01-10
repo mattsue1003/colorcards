@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flix Mix 四色牌卡生成器</title>
+    
+    <!-- 引入 React, ReactDOM, Babel 和 Tailwind CSS -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 引入 html2canvas (截圖用) 和 jsPDF (生成PDF用) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <style>
+        /* A4 紙張標準尺寸 210mm x 297mm */
+        .a4-page-content {
+            width: 210mm;
+            height: 297mm;
+            background: white;
+            position: relative;
+            transform-origin: top left; /* 重要：從左上角開始縮放 */
+        }
+
+        /* 預覽容器 wrapper，負責佔據正確的空間 */
+        .preview-wrapper {
+            margin: 0 auto;
+            background-color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            overflow: hidden; /* 確保內容不會跑出來 */
+        }
+
+        /* 自定義 range input 樣式 */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%; 
+            background: transparent; 
+            margin: 8px 0;
+        }
+
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 6px;
+            cursor: pointer;
+            background: #e5e7eb;
+            border-radius: 3px;
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px;
+            width: 18px;
+            border-radius: 50%;
+            background: #4f46e5;
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+            border: 2px solid white;
+        }
+        
+        input[type=range]:focus { outline: none; }
+
+        /* 列印專用樣式 */
+        @media print {
+            @page { size: A4; margin: 0; }
+            body { background: white; margin: 0; padding: 0; }
+            .no-print { display: none !important; }
+            .preview-wrapper {
+                box-shadow: none;
+                margin: 0;
+                width: 210mm !important;
+                height: 297mm !important;
+                page-break-after: always;
+            }
+            .a4-page-content {
+                transform: scale(1) !important; /* 列印時強制不縮放 */
+            }
+            * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // 圖標組件
+        const PrinterIcon = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+        );
+        const DownloadIcon = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+        );
+        const SettingsIcon = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+        );
+        const LoaderIcon = () => (
+             <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+        );
+        const BookIcon = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+        );
+        const MenuIcon = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        );
+        const CloseIcon = () => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        );
+
+        // 排列組合算法
+        const getPermutations = (arr) => {
+            if (arr.length === 0) return [[]];
+            const firstElem = arr[0];
+            const rest = arr.slice(1);
+            const permsWithoutFirst = getPermutations(rest);
+            const allPermutations = [];
+
+            permsWithoutFirst.forEach((perm) => {
+                for (let i = 0; i <= perm.length; i++) {
+                    const permWithFirst = [...perm.slice(0, i), firstElem, ...perm.slice(i)];
+                    allPermutations.push(permWithFirst);
+                }
+            });
+            return allPermutations;
+        };
+
+        // A4 預覽組件 - 負責正確縮放
+        const ScalableA4 = ({ scale, children, className }) => {
+            const width = `${210 * scale}mm`;
+            const height = `${297 * scale}mm`;
+            
+            return (
+                <div 
+                    className={`preview-wrapper ${className}`}
+                    style={{ width, height }}
+                >
+                    <div 
+                        className="a4-page-content"
+                        style={{ transform: `scale(${scale})` }}
+                    >
+                        {children}
+                    </div>
+                </div>
+            );
+        };
+
+        const CardGenerator = () => {
+            const [colors, setColors] = useState(['#EF4444', '#F59E0B', '#3B82F6', '#10B981']);
+            const [cards, setCards] = useState([]);
+            const [mode, setMode] = useState('standard'); 
+            const [isGenerating, setIsGenerating] = useState(false);
+            
+            // 外觀設定
+            const [circleScale, setCircleScale] = useState(1); 
+            const [showCircleBorder, setShowCircleBorder] = useState(true);
+            const [circleBorderWidth, setCircleBorderWidth] = useState(1); 
+            const [cardBorderWidth, setCardBorderWidth] = useState(2); 
+            const [showRules, setShowRules] = useState(true);
+            
+            // 手機版選單控制
+            const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+            // 響應式縮放比例
+            const [previewScale, setPreviewScale] = useState(1);
+            const previewContainerRef = useRef(null);
+
+            useEffect(() => {
+                const baseIndices = [0, 1, 2, 3];
+                const perms = getPermutations(baseIndices);
+                setCards(perms);
+                
+                // 智慧縮放計算
+                const calculateScale = () => {
+                    if (previewContainerRef.current) {
+                        const containerWidth = previewContainerRef.current.clientWidth;
+                        // A4 寬度約為 794px (96dpi) 或 210mm
+                        // 我們預留左右 padding 約 32px
+                        const availableWidth = containerWidth - 32; 
+                        // 1mm = 3.7795px
+                        const a4WidthPx = 210 * 3.7795;
+                        
+                        let newScale = availableWidth / a4WidthPx;
+                        if (newScale > 1) newScale = 1;
+                        setPreviewScale(newScale);
+                    }
+                };
+
+                calculateScale();
+                window.addEventListener('resize', calculateScale);
+                return () => window.removeEventListener('resize', calculateScale);
+            }, []);
+
+            const handleColorChange = (index, newColor) => {
+                const newColors = [...colors];
+                newColors[index] = newColor;
+                setColors(newColors);
+            };
+
+            const handlePrint = () => {
+                window.print();
+            };
+
+            const handleDownloadPDF = async () => {
+                setIsGenerating(true);
+                await new Promise(resolve => setTimeout(resolve, 300));
+
+                try {
+                    const { jsPDF } = window.jspdf;
+                    const pdf = new jsPDF('p', 'mm', 'a4');
+                    const pageElements = document.querySelectorAll('.a4-page-content');
+                    
+                    for (let i = 0; i < pageElements.length; i++) {
+                        const element = pageElements[i];
+                        
+                        const captureScale = 2 / previewScale; 
+
+                        const canvas = await html2canvas(element, {
+                            scale: captureScale, 
+                            useCORS: true,
+                            logging: false,
+                            width: element.offsetWidth,
+                            height: element.offsetHeight,
+                            windowWidth: element.scrollWidth,
+                            windowHeight: element.scrollHeight
+                        });
+                        
+                        const imgData = canvas.toDataURL('image/jpeg', 0.85);
+                        const imgWidth = 210;
+                        const imgHeight = 297;
+
+                        if (i > 0) {
+                            pdf.addPage();
+                        }
+                        pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
+                    }
+
+                    pdf.save(`FlixMix_BoardGame.pdf`);
+                } catch (error) {
+                    console.error("生成 PDF 失敗:", error);
+                    alert("PDF 生成失敗，建議使用電腦版操作效果最佳。");
+                } finally {
+                    setIsGenerating(false);
+                }
+            };
+
+            // 模式設定參數
+            const config = mode === 'elderly' 
+                ? {
+                    name: '長者友善模式',
+                    perPage: 6,
+                    gridClass: 'grid-cols-2 gap-8 content-center', 
+                    cardSize: 'w-[85mm] h-[85mm]', 
+                    baseCircleSizePx: 64, 
+                    containerPadding: 'p-8' 
+                  }
+                : {
+                    name: '標準模式',
+                    perPage: 12,
+                    gridClass: 'grid-cols-3 gap-6 content-center',
+                    cardSize: 'w-[55mm] h-[55mm]',
+                    baseCircleSizePx: 40,
+                    containerPadding: 'p-10'
+                  };
+
+            const actualCircleSize = config.baseCircleSizePx * circleScale;
+
+            const pages = [];
+            for (let i = 0; i < cards.length; i += config.perPage) {
+                pages.push(cards.slice(i, i + config.perPage));
+            }
+
+            return (
+                <div className="min-h-screen flex flex-col md:flex-row">
+                    
+                    {/* 手機版頂部導航列 */}
+                    <div className="md:hidden bg-white shadow-sm p-4 flex justify-between items-center sticky top-0 z-30">
+                        <h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">
+                            <SettingsIcon /> 桌遊生成器
+                        </h1>
+                        <button 
+                            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                            className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+                        >
+                            {mobileMenuOpen ? <CloseIcon /> : <MenuIcon />}
+                        </button>
+                    </div>
+
+                    {/* 左側控制面板 */}
+                    <div className={`
+                        no-print bg-white shadow-xl z-20 
+                        md:w-80 md:fixed md:inset-y-0 md:left-0 md:h-screen md:overflow-y-auto md:translate-x-0
+                        fixed top-[60px] left-0 w-full h-[calc(100vh-60px)] overflow-y-auto transition-transform duration-300
+                        ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}
+                    `}>
+                        <div className="p-6 pb-24 md:pb-6">
+                            <h1 className="text-2xl font-bold mb-6 flex items-center gap-2 text-indigo-600 hidden md:flex">
+                                <SettingsIcon />
+                                桌遊生成器
+                            </h1>
+
+                            {/* 模式選擇 */}
+                            <div className="mb-6">
+                                <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">排版模式</h2>
+                                <div className="flex gap-2 bg-gray-100 p-1 rounded-lg">
+                                    <button 
+                                        onClick={() => { setMode('standard'); setMobileMenuOpen(false); }}
+                                        className={`flex-1 py-2 px-3 text-sm font-medium rounded-md transition-all ${mode === 'standard' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                    >
+                                        標準
+                                    </button>
+                                    <button 
+                                        onClick={() => { setMode('elderly'); setMobileMenuOpen(false); }}
+                                        className={`flex-1 py-2 px-3 text-sm font-medium rounded-md transition-all ${mode === 'elderly' ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                    >
+                                        長者/大字
+                                    </button>
+                                </div>
+                            </div>
+
+                             {/* 玩法說明頁開關 */}
+                             <div className="mb-6">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm font-bold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+                                        <BookIcon />
+                                        加入玩法說明頁
+                                    </span>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" checked={showRules} onChange={(e) => setShowRules(e.target.checked)} className="sr-only peer" />
+                                        <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-green-500"></div>
+                                    </label>
+                                </div>
+                                <p className="text-xs text-gray-400">開啟後，PDF 第一頁將會是玩法教學。</p>
+                            </div>
+
+                            {/* 外觀細節設定 */}
+                            <div className="mb-6 space-y-4">
+                                <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider">外觀細節設定</h2>
+                                
+                                {/* 牌卡框線 */}
+                                <div>
+                                    <div className="flex justify-between text-xs mb-1 text-gray-600">
+                                        <span>牌卡框粗細</span>
+                                        <span>{cardBorderWidth}px</span>
+                                    </div>
+                                    <input 
+                                        type="range" min="0" max="8" step="1" 
+                                        value={cardBorderWidth}
+                                        onChange={(e) => setCardBorderWidth(Number(e.target.value))}
+                                    />
+                                </div>
+
+                                {/* 圓形大小 */}
+                                <div>
+                                    <div className="flex justify-between text-xs mb-1 text-gray-600">
+                                        <span>圓形大小</span>
+                                        <span>{Math.round(circleScale * 100)}%</span>
+                                    </div>
+                                    <input 
+                                        type="range" min="0.5" max="1.5" step="0.1" 
+                                        value={circleScale}
+                                        onChange={(e) => setCircleScale(Number(e.target.value))}
+                                    />
+                                </div>
+
+                                {/* 圓形外框控制 */}
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm text-gray-700">顯示圓形外框</span>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input type="checkbox" checked={showCircleBorder} onChange={(e) => setShowCircleBorder(e.target.checked)} className="sr-only peer" />
+                                        <div className="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                                    </label>
+                                </div>
+
+                                {showCircleBorder && (
+                                    <div>
+                                        <div className="flex justify-between text-xs mb-1 text-gray-600">
+                                            <span>圓形框粗細</span>
+                                            <span>{circleBorderWidth}px</span>
+                                        </div>
+                                        <input 
+                                            type="range" min="1" max="5" step="0.5" 
+                                            value={circleBorderWidth}
+                                            onChange={(e) => setCircleBorderWidth(Number(e.target.value))}
+                                        />
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* 顏色設定 */}
+                            <div className="mb-8">
+                                <h2 className="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">顏色設定</h2>
+                                <div className="grid grid-cols-4 md:grid-cols-1 gap-2 md:gap-4">
+                                    {colors.map((color, index) => (
+                                        <div key={index} className="flex items-center gap-3">
+                                            <input
+                                                type="color"
+                                                value={color}
+                                                onChange={(e) => handleColorChange(index, e.target.value)}
+                                                className="w-10 h-10 rounded cursor-pointer border-2 border-gray-200 p-1 flex-shrink-0"
+                                            />
+                                            <span className="text-sm font-medium text-gray-600 hidden md:inline">顏色 {index + 1}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* 操作按鈕 */}
+                            <div className="space-y-3">
+                                <button
+                                    onClick={handleDownloadPDF}
+                                    disabled={isGenerating}
+                                    className={`w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-lg shadow transition-colors flex items-center justify-center gap-2 ${isGenerating ? 'opacity-75 cursor-not-allowed' : ''}`}
+                                >
+                                    {isGenerating ? <LoaderIcon /> : <DownloadIcon />}
+                                    {isGenerating ? '生成中...' : '下載 PDF'}
+                                </button>
+
+                                <button
+                                    onClick={handlePrint}
+                                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-4 rounded-lg shadow transition-colors flex items-center justify-center gap-2 hidden md:flex"
+                                >
+                                    <PrinterIcon />
+                                    電腦版列印
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* 右側預覽區 */}
+                    <div className="md:ml-80 w-full min-h-screen bg-gray-100 p-4 md:p-12 print-padding print-ml-0 print-w-full">
+                        <div ref={previewContainerRef} className="max-w-[1200px] mx-auto w-full">
+                            
+                            <div className="no-print mb-6 text-center">
+                                <h2 className="text-2xl font-bold text-gray-800 mb-2">
+                                    預覽：{config.name}
+                                </h2>
+                                <p className="text-sm text-gray-500">
+                                    畫面已自動縮放至適合您的螢幕寬度 (比例: {Math.round(previewScale * 100)}%)
+                                </p>
+                            </div>
+
+                            <div className="flex flex-col items-center gap-8 md:gap-12 pb-12">
+                                {/* 玩法說明頁 */}
+                                {showRules && (
+                                    <ScalableA4 scale={previewScale} className="shadow-lg">
+                                        <div className="w-full h-full bg-white p-6 flex flex-col text-gray-800 font-sans box-border">
+                                            {/* Header */}
+                                            <div className="border-b-4 border-indigo-600 pb-2 mb-3 flex justify-between items-end">
+                                                <div>
+                                                    <h1 className="text-3xl font-black text-indigo-700 mb-1 tracking-tight">四色版：遊戲規則說明書</h1>
+                                                    <p className="text-sm text-gray-500 font-bold tracking-wide">適用人數：1-4 人 &nbsp;|&nbsp; 配件：24 張四色方塊卡牌</p>
+                                                </div>
+                                            </div>
+
+                                            {/* Content Grid - 全面放大字體至 text-sm (14px) 並調整行距 */}
+                                            <div className="grid grid-cols-2 gap-4 flex-1 text-sm leading-snug">
+                                                {/* Left Column */}
+                                                <div className="space-y-3">
+                                                    <section className="bg-blue-50 p-3 rounded-xl border border-blue-100">
+                                                        <h3 className="font-bold text-blue-800 text-base mb-1">玩法一：邊境接龍 (Edge Matching)</h3>
+                                                        <p className="text-gray-600 mb-2 italic">最正統的拼圖玩法，考驗觀察力與邏輯規劃，難度中等。</p>
+                                                        <div className="space-y-2">
+                                                            <div>
+                                                                <span className="font-bold text-blue-700 block">1. 遊戲準備</span>
+                                                                <ul className="list-disc pl-4 text-gray-700">
+                                                                    <li>將 24 張牌洗勻。</li>
+                                                                    <li>依人數平均分發給所有玩家。</li>
+                                                                    <li>猜拳決定起始玩家，打出「起始牌」。</li>
+                                                                </ul>
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-bold text-blue-700 block">2. 遊戲進行</span>
+                                                                <ul className="list-disc pl-4 text-gray-700">
+                                                                    <li>順時針輪流出牌。接在桌面任意牌旁。</li>
+                                                                    <li><strong>接合規則：</strong>兩張牌相鄰的「邊」必須完全吻合。即相鄰的兩個角落顏色都要一樣（例如：上張牌下邊是紅+藍，你的牌上邊也要是紅+藍）。</li>
+                                                                    <li>若無法出牌，則該回合跳過（PASS）。</li>
+                                                                </ul>
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-bold text-blue-700 block">3. 獲勝條件</span>
+                                                                <p className="pl-1 text-gray-700">最先將手牌全部出完的玩家獲勝。</p>
+                                                            </div>
+                                                        </div>
+                                                    </section>
+
+                                                    <section className="bg-red-50 p-3 rounded-xl border border-red-100">
+                                                        <h3 className="font-bold text-red-800 text-base mb-1">玩法二：極速反應 (Speed Match)</h3>
+                                                        <p className="text-gray-600 mb-2 italic">不分回合，考驗手眼協調的派對玩法，場面最刺激。</p>
+                                                        <div className="space-y-2">
+                                                            <div>
+                                                                <span className="font-bold text-red-700 block">1. 遊戲準備</span>
+                                                                <p className="pl-1 text-gray-700">將牌平均分給玩家疊成牌庫。若剛好分完，則由任意一位玩家提供一張牌置於中央作為起始牌。</p>
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-bold text-red-700 block">2. 遊戲進行</span>
+                                                                <ul className="list-disc pl-4 text-gray-700">
+                                                                    <li>喊「開始」後，所有人同時翻牌。</li>
+                                                                    <li>看到符合<strong>「邊對邊配對」</strong>即可搶出牌。</li>
+                                                                    <li><strong>配對規則：</strong>規則同玩法一，非角落堆疊。只要手牌的邊能與桌面牌的邊吻合，即可搶快打出。</li>
+                                                                </ul>
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-bold text-red-700 block">3. 獲勝條件</span>
+                                                                <p className="pl-1 text-gray-700">最先將自己的牌庫清空的玩家獲勝。</p>
+                                                            </div>
+                                                        </div>
+                                                    </section>
+
+                                                    <section className="bg-purple-50 p-3 rounded-xl border border-purple-100">
+                                                        <h3 className="font-bold text-purple-800 text-base mb-1">玩法三：記憶邊境 (Memory Edge)</h3>
+                                                        <p className="text-gray-600 mb-2 italic">適合 2 人遊玩，考驗記憶力與幾何配對。</p>
+                                                        <ul className="list-disc pl-4 text-gray-700 space-y-1">
+                                                            <li>將 24 張牌面朝下，排成 4x6 的方陣。</li>
+                                                            <li>輪流翻開兩張牌。</li>
+                                                            <li><strong>配對成功：</strong>邊可以完美拼接，收走得分。</li>
+                                                            <li><strong>配對失敗：</strong>蓋回原位，換對手翻牌。</li>
+                                                            <li>桌面清空後，擁有最多牌的玩家獲勝。</li>
+                                                        </ul>
+                                                    </section>
+                                                </div>
+
+                                                {/* Right Column */}
+                                                <div className="space-y-3">
+                                                    <section className="bg-green-50 p-3 rounded-xl border border-green-100">
+                                                        <h3 className="font-bold text-green-800 text-base mb-2">單人挑戰模式</h3>
+                                                        <div className="space-y-2">
+                                                            <div>
+                                                                <span className="font-bold text-green-700 block bg-green-200 px-2 py-0.5 rounded w-max mb-1 text-xs">版本 A：七彩貪食蛇 (簡單)</span>
+                                                                <p className="text-gray-700">目標將 24 張牌接成一條長龍。相鄰邊必須顏色吻合。路徑可自由彎折，不需常一直線。</p>
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-bold text-green-700 block bg-green-200 px-2 py-0.5 rounded w-max mb-1 text-xs">版本 B：完美矩陣 (困難)</span>
+                                                                <p className="text-gray-700">嘗試將 24 張牌排成一個 4x6 或 3x8 的實心矩形。所有相鄰的邊都必須顏色吻合。</p>
+                                                            </div>
+                                                        </div>
+                                                    </section>
+
+                                                    {/* 修正橘色區塊 */}
+                                                    <section className="bg-orange-50 p-3 rounded-xl border border-orange-100">
+                                                        <h3 className="font-bold text-orange-800 text-base mb-1">額外玩法：樂活對對碰</h3>
+                                                        <p className="text-gray-600 mb-2 italic">專為失智症長者設計，強調色彩辨識與成就感。</p>
+                                                        <div className="space-y-2">
+                                                            <div>
+                                                                <span className="font-bold text-orange-700 block">1. 遊戲準備</span>
+                                                                <ul className="list-disc pl-4 text-gray-700">
+                                                                    <li>建議使用<strong>長者友善模式</strong>。初次僅用 6-12 張。</li>
+                                                                    <li>中央放一張底牌，其餘面朝上散開。</li>
+                                                                </ul>
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-bold text-orange-700 block">2. 引導式玩法</span>
+                                                                <ul className="list-decimal pl-4 text-gray-700 space-y-1">
+                                                                    <li><strong>觀察：</strong>引導觀察底牌角落顏色。</li>
+                                                                    <li><strong>搜尋：</strong>找出也有相同顏色角落的牌。</li>
+                                                                    <li><strong>動作：</strong>協助將牌對準顏色蓋上去。</li>
+                                                                    <li><strong>鼓勵：</strong>給予口頭讚美，換下一個顏色。</li>
+                                                                </ul>
+                                                            </div>
+                                                            <div>
+                                                                <span className="font-bold text-orange-700 block">3. 遊戲目標</span>
+                                                                <p className="pl-1 text-gray-700">慢慢將散開的牌全部接成一條色彩繽紛的長龍。</p>
+                                                            </div>
+                                                        </div>
+                                                    </section>
+                                                </div>
+                                            </div>
+                                            <div className="mt-auto border-t pt-2 text-center text-xs text-gray-400">
+                                                FlixMix Generator • Designed for Print & Play
+                                            </div>
+                                        </div>
+                                    </ScalableA4>
+                                )}
+
+                                {/* 卡片頁面 */}
+                                {pages.map((pageCards, pageIndex) => (
+                                    <ScalableA4 key={pageIndex} scale={previewScale} className="shadow-lg">
+                                        <div className={`w-full h-full flex flex-col ${config.containerPadding} bg-white box-border`}>
+                                            {/* 頁碼 */}
+                                            <div className="absolute top-4 right-6 text-gray-300 font-mono text-xs print:text-gray-400">
+                                                Page {pageIndex + 1} / {pages.length} - {config.name}
+                                            </div>
+
+                                            {/* 卡片網格 */}
+                                            <div className={`grid ${config.gridClass} justify-items-center content-center h-full`}>
+                                                {pageCards.map((cardConfig, cardIndex) => (
+                                                    <div 
+                                                        key={cardIndex} 
+                                                        className={`relative bg-white border-gray-300 rounded-xl flex flex-wrap shadow-sm print:border-gray-400 box-border ${config.cardSize}`}
+                                                        style={{ borderWidth: `${cardBorderWidth}px` }}
+                                                    >
+                                                        {/* 切割線標記 */}
+                                                        <div className="absolute -top-px -left-px w-2 h-2 border-t border-l border-gray-400"></div>
+                                                        <div className="absolute -top-px -right-px w-2 h-2 border-t border-r border-gray-400"></div>
+                                                        <div className="absolute -bottom-px -left-px w-2 h-2 border-b border-l border-gray-400"></div>
+                                                        <div className="absolute -bottom-px -right-px w-2 h-2 border-b border-r border-gray-400"></div>
+
+                                                        {/* 四個角落的顏色 */}
+                                                        {[0, 1, 2, 3].map((pos) => (
+                                                            <div key={pos} className="w-1/2 h-1/2 flex items-center justify-center p-1">
+                                                                <div 
+                                                                    className={`rounded-full shadow-inner border-black/10 print:border-black/20`}
+                                                                    style={{ 
+                                                                        backgroundColor: colors[cardConfig[pos]],
+                                                                        width: `${actualCircleSize}px`,
+                                                                        height: `${actualCircleSize}px`,
+                                                                        borderWidth: showCircleBorder ? `${circleBorderWidth}px` : '0px',
+                                                                        borderStyle: 'solid',
+                                                                        borderColor: 'rgba(0,0,0,0.1)' 
+                                                                    }}
+                                                                ></div>
+                                                            </div>
+                                                        ))}
+
+                                                        {/* 中央裝飾點 */}
+                                                        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-2 h-2 bg-white rounded-full border border-gray-300"></div>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            <div className="absolute bottom-4 left-0 w-full text-center text-gray-300 text-xs print:text-gray-400">
+                                                --- 沿線裁剪 (建議貼於厚紙板) ---
+                                            </div>
+                                        </div>
+                                    </ScalableA4>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<CardGenerator />);
+    </script>
+</body>
+</html>
