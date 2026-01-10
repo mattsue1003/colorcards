@@ -23,6 +23,7 @@
             background: white;
             position: relative;
             transform-origin: top left; /* 重要：從左上角開始縮放 */
+            overflow: hidden; /* 防止內容溢出導致多頁 */
         }
 
         /* 預覽容器 wrapper，負責佔據正確的空間 */
@@ -30,7 +31,7 @@
             margin: 0 auto;
             background-color: white;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-            overflow: hidden; /* 確保內容不會跑出來 */
+            overflow: visible; /* 允許陰影顯示，但列印時會隱藏 */
         }
 
         /* 自定義 range input 樣式 */
@@ -63,16 +64,19 @@
         
         input[type=range]:focus { outline: none; }
 
-        /* 列印專用樣式 */
+        /* 列印專用樣式 - 修正多餘空白頁問題 */
         @media print {
             @page { 
                 size: A4; 
                 margin: 0; 
             }
-            body { 
-                background: white; 
-                margin: 0; 
-                padding: 0; 
+            html, body {
+                height: auto !important;
+                min-height: 0 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                background: white;
+                overflow: visible !important;
             }
             
             /* 隱藏不需要列印的元素 */
@@ -80,7 +84,7 @@
                 display: none !important; 
             }
 
-            /* --- 關鍵修正：強制重置外層容器樣式，防止位置跑掉 --- */
+            /* 強制重置外層容器樣式 */
             .print-ml-0 {
                 margin-left: 0 !important;
             }
@@ -92,13 +96,6 @@
                 max-width: none !important;
             }
             
-            /* 強制移除外層的 Flexbox 佈局影響 */
-            .min-h-screen {
-                min-height: 0 !important;
-                height: auto !important;
-                display: block !important;
-            }
-            
             /* 預覽容器在列印時的強制設定 */
             .preview-wrapper {
                 box-shadow: none !important;
@@ -106,21 +103,28 @@
                 padding: 0 !important;
                 width: 210mm !important;
                 height: 297mm !important;
-                page-break-after: always;
+                page-break-after: always; /* 強制分頁 */
                 page-break-inside: avoid;
-                overflow: visible !important;
+                overflow: hidden !important; /* 隱藏溢出 */
                 display: block !important;
+                transform: none !important; /* 取消縮放 */
             }
             
             /* 內容頁面在列印時強制還原比例 (不縮放) */
             .a4-page-content {
-                transform: scale(1) !important; /* 強制還原比例 */
+                transform: none !important; /* 強制還原比例 */
                 width: 210mm !important;
                 height: 297mm !important;
                 margin: 0 !important;
+                box-shadow: none !important;
+                border: none !important;
             }
             
-            /* 確保顏色準確列印 */
+            /* 最後一頁不要分頁，避免產生空白頁 */
+            .preview-wrapper:last-child {
+                page-break-after: auto !important;
+            }
+
             * {
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
@@ -178,7 +182,7 @@
         };
 
         // A4 預覽組件 - 負責正確縮放
-        const ScalableA4 = ({ scale, children, className }) => {
+        const ScalableA4 = ({ scale, children, className, id }) => {
             const width = `${210 * scale}mm`;
             const height = `${297 * scale}mm`;
             
@@ -188,6 +192,7 @@
                     style={{ width, height }}
                 >
                     <div 
+                        id={id}
                         className="a4-page-content"
                         style={{ transform: `scale(${scale})` }}
                     >
@@ -226,10 +231,7 @@
                 const calculateScale = () => {
                     if (previewContainerRef.current) {
                         const containerWidth = previewContainerRef.current.clientWidth;
-                        // A4 寬度約為 794px (96dpi) 或 210mm
-                        // 我們預留左右 padding 約 32px
                         const availableWidth = containerWidth - 32; 
-                        // 1mm = 3.7795px
                         const a4WidthPx = 210 * 3.7795;
                         
                         let newScale = availableWidth / a4WidthPx;
@@ -260,37 +262,53 @@
                 try {
                     const { jsPDF } = window.jspdf;
                     const pdf = new jsPDF('p', 'mm', 'a4');
-                    const pageElements = document.querySelectorAll('.a4-page-content');
                     
-                    for (let i = 0; i < pageElements.length; i++) {
-                        const element = pageElements[i];
+                    // 收集所有頁面的 ID
+                    const pageIds = [];
+                    if (showRules) pageIds.push('page-rules');
+                    for (let i = 0; i < pages.length; i++) {
+                        pageIds.push(`page-card-${i}`);
+                    }
+                    
+                    for (let i = 0; i < pageIds.length; i++) {
+                        const elementId = pageIds[i];
+                        const element = document.getElementById(elementId);
                         
-                        const captureScale = 2 / previewScale; 
+                        if (!element) continue;
 
+                        // 使用 onclone 技術修正手機版縮放問題
                         const canvas = await html2canvas(element, {
-                            scale: captureScale, 
+                            scale: 2, // 固定使用高解析度，不依賴螢幕縮放
                             useCORS: true,
                             logging: false,
-                            width: element.offsetWidth,
+                            width: element.offsetWidth, // 使用元素的原始寬度
                             height: element.offsetHeight,
                             windowWidth: element.scrollWidth,
-                            windowHeight: element.scrollHeight
+                            onclone: (clonedDoc) => {
+                                // 這是關鍵：在截圖的一瞬間，將複製出來的元素還原成 100% 大小
+                                const clonedElement = clonedDoc.getElementById(elementId);
+                                if (clonedElement) {
+                                    clonedElement.style.transform = 'scale(1)'; // 強制還原比例
+                                    clonedElement.style.transformOrigin = 'top left';
+                                }
+                            }
                         });
                         
-                        const imgData = canvas.toDataURL('image/jpeg', 0.85);
+                        const imgData = canvas.toDataURL('image/jpeg', 0.9); // 微調品質
                         const imgWidth = 210;
                         const imgHeight = 297;
 
                         if (i > 0) {
                             pdf.addPage();
                         }
+                        // 強制圖片填滿 A4，不留邊距，避免溢出產生空白頁
                         pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
                     }
 
                     pdf.save(`FlixMix_BoardGame.pdf`);
                 } catch (error) {
                     console.error("生成 PDF 失敗:", error);
-                    alert("PDF 生成失敗，建議使用電腦版操作效果最佳。");
+                    alert("PDF 生成失敗，請重試。");
                 } finally {
                     setIsGenerating(false);
                 }
@@ -495,7 +513,7 @@
                             <div className="flex flex-col items-center gap-8 md:gap-12 pb-12">
                                 {/* 玩法說明頁 */}
                                 {showRules && (
-                                    <ScalableA4 scale={previewScale} className="shadow-lg">
+                                    <ScalableA4 scale={previewScale} className="shadow-lg" id="page-rules">
                                         <div className="w-full h-full bg-white p-6 flex flex-col text-gray-800 font-sans box-border">
                                             {/* Header */}
                                             <div className="border-b-4 border-indigo-600 pb-2 mb-3 flex justify-between items-end">
@@ -625,7 +643,7 @@
 
                                 {/* 卡片頁面 */}
                                 {pages.map((pageCards, pageIndex) => (
-                                    <ScalableA4 key={pageIndex} scale={previewScale} className="shadow-lg">
+                                    <ScalableA4 key={pageIndex} scale={previewScale} className="shadow-lg" id={`page-card-${pageIndex}`}>
                                         <div className={`w-full h-full flex flex-col ${config.containerPadding} bg-white box-border`}>
                                             {/* 頁碼 */}
                                             <div className="absolute top-4 right-6 text-gray-300 font-mono text-xs print:text-gray-400">
