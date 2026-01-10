@@ -65,19 +65,62 @@
 
         /* 列印專用樣式 */
         @media print {
-            @page { size: A4; margin: 0; }
-            body { background: white; margin: 0; padding: 0; }
-            .no-print { display: none !important; }
+            @page { 
+                size: A4; 
+                margin: 0; 
+            }
+            body { 
+                background: white; 
+                margin: 0; 
+                padding: 0; 
+            }
+            
+            /* 隱藏不需要列印的元素 */
+            .no-print { 
+                display: none !important; 
+            }
+
+            /* --- 關鍵修正：強制重置外層容器樣式，防止位置跑掉 --- */
+            .print-ml-0 {
+                margin-left: 0 !important;
+            }
+            .print-padding {
+                padding: 0 !important;
+            }
+            .print-w-full {
+                width: 100% !important;
+                max-width: none !important;
+            }
+            
+            /* 強制移除外層的 Flexbox 佈局影響 */
+            .min-h-screen {
+                min-height: 0 !important;
+                height: auto !important;
+                display: block !important;
+            }
+            
+            /* 預覽容器在列印時的強制設定 */
             .preview-wrapper {
-                box-shadow: none;
-                margin: 0;
+                box-shadow: none !important;
+                margin: 0 !important;
+                padding: 0 !important;
                 width: 210mm !important;
                 height: 297mm !important;
                 page-break-after: always;
+                page-break-inside: avoid;
+                overflow: visible !important;
+                display: block !important;
             }
+            
+            /* 內容頁面在列印時強制還原比例 (不縮放) */
             .a4-page-content {
-                transform: scale(1) !important; /* 列印時強制不縮放 */
+                transform: scale(1) !important; /* 強制還原比例 */
+                width: 210mm !important;
+                height: 297mm !important;
+                margin: 0 !important;
             }
+            
+            /* 確保顏色準確列印 */
             * {
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
@@ -462,7 +505,7 @@
                                                 </div>
                                             </div>
 
-                                            {/* Content Grid - 全面放大字體至 text-sm (14px) 並調整行距 */}
+                                            {/* Content Grid */}
                                             <div className="grid grid-cols-2 gap-4 flex-1 text-sm leading-snug">
                                                 {/* Left Column */}
                                                 <div className="space-y-3">
@@ -545,7 +588,6 @@
                                                         </div>
                                                     </section>
 
-                                                    {/* 修正橘色區塊 */}
                                                     <section className="bg-orange-50 p-3 rounded-xl border border-orange-100">
                                                         <h3 className="font-bold text-orange-800 text-base mb-1">額外玩法：樂活對對碰</h3>
                                                         <p className="text-gray-600 mb-2 italic">專為失智症長者設計，強調色彩辨識與成就感。</p>
