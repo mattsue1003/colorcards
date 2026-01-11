@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Flix Mix 四色牌卡生成器</title>
+    <title>四色卡牌桌遊產生器</title>
     
     <!-- 引入 React, ReactDOM, Babel 和 Tailwind CSS -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -346,7 +346,7 @@
                     {/* 手機版頂部導航列 */}
                     <div className="md:hidden bg-white shadow-sm p-4 flex justify-between items-center sticky top-0 z-30">
                         <h1 className="text-xl font-bold text-indigo-600 flex items-center gap-2">
-                            <SettingsIcon /> 桌遊生成器
+                            <SettingsIcon /> 四色卡牌桌遊產生器
                         </h1>
                         <button 
                             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
@@ -366,7 +366,7 @@
                         <div className="p-6 pb-24 md:pb-6">
                             <h1 className="text-2xl font-bold mb-6 flex items-center gap-2 text-indigo-600 hidden md:flex">
                                 <SettingsIcon />
-                                桌遊生成器
+                                四色卡牌桌遊產生器
                             </h1>
 
                             {/* 模式選擇 */}
@@ -518,7 +518,7 @@
                                             {/* Header */}
                                             <div className="border-b-4 border-indigo-600 pb-2 mb-3 flex justify-between items-end">
                                                 <div>
-                                                    <h1 className="text-3xl font-black text-indigo-700 mb-1 tracking-tight">四色版：遊戲規則說明書</h1>
+                                                    <h1 className="text-3xl font-black text-indigo-700 mb-1 tracking-tight">四色卡牌：遊戲規則說明書</h1>
                                                     <p className="text-sm text-gray-500 font-bold tracking-wide">適用人數：1-4 人 &nbsp;|&nbsp; 配件：24 張四色方塊卡牌</p>
                                                 </div>
                                             </div>
@@ -606,6 +606,7 @@
                                                         </div>
                                                     </section>
 
+                                                    {/* 修正橘色區塊 */}
                                                     <section className="bg-orange-50 p-3 rounded-xl border border-orange-100">
                                                         <h3 className="font-bold text-orange-800 text-base mb-1">額外玩法：樂活對對碰</h3>
                                                         <p className="text-gray-600 mb-2 italic">專為失智症長者設計，強調色彩辨識與成就感。</p>
