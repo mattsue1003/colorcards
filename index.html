@@ -71,11 +71,10 @@
   .preview-head p { font-size: 13px; color: #888; margin-top: 4px; }
   .pages { display: flex; flex-direction: column; align-items: center; gap: 32px; }
 
-  /* A4 預覽頁 (螢幕用 px 縮放) */
+  /* A4 預覽頁（尺寸由 JS 依縮放比設定，避免 transform 造成版面跳動） */
   .a4 {
-    width: 794px; height: 1123px; background: #fff; position: relative;
+    display: block; background: #fff;
     box-shadow: 0 6px 20px rgba(0,0,0,.15); flex-shrink: 0;
-    transform-origin: top center;
   }
 
   /* 行動版頂部列 */
@@ -604,7 +603,7 @@ function drawCard(ctx, x, y, size, cardCfg){
     ctx.fill();
     if(state.showCircleBorder){
       ctx.lineWidth = state.circleBorderWidth;
-      ctx.strokeStyle = 'rgba(0,0,0,0.12)'; ctx.stroke();
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'; ctx.stroke();
     }
   });
   // 中央小白點
@@ -635,14 +634,9 @@ function drawCropMarks(ctx,x,y,s){
   });
 }
 
-/* ===== 畫一整頁卡片到 canvas (回傳 canvas) ===== */
-function renderCardPage(pageCards, pageIndex, totalPages, hi){
+/* ===== 在已對齊 794x1123 邏輯座標的 ctx 上畫整頁卡片 ===== */
+function paintCardPage(ctx, pageCards, pageIndex, totalPages){
   const m = MODES[state.mode];
-  const W = 794*hi, H = 1123*hi;
-  const cv = document.createElement('canvas');
-  cv.width=W; cv.height=H;
-  const ctx = cv.getContext('2d');
-  ctx.scale(hi,hi);
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,794,1123);
 
   const cardSize = m.cardMM*MM;
@@ -663,10 +657,17 @@ function renderCardPage(pageCards, pageIndex, totalPages, hi){
   ctx.fillText(`Page ${pageIndex+1} / ${totalPages} · ${m.name}`, 794-24, 28);
   ctx.textAlign='center';
   ctx.fillText('--- 沿線裁剪（建議貼於厚紙板） ---', 397, 1123-30);
-  // 署名
   ctx.fillStyle='#999'; ctx.font='11px sans-serif';
   ctx.fillText('設計者：愛迪樂　鍾孟修　職能治療師', 397, 1123-14);
+}
 
+/* PDF 用：建立高解析 canvas 後委派 paintCardPage 繪製 */
+function renderCardPage(pageCards, pageIndex, totalPages, hi){
+  const cv = document.createElement('canvas');
+  cv.width=794*hi; cv.height=1123*hi;
+  const ctx = cv.getContext('2d');
+  ctx.scale(hi,hi);
+  paintCardPage(ctx, pageCards, pageIndex, totalPages);
   return cv;
 }
 
@@ -682,10 +683,15 @@ function wrapText(ctx, text, maxW){
   return lines;
 }
 
+/* PDF 用：建立高解析 canvas 後委派 paintRules 繪製 */
 function renderRulesPage(hi){
-  const W=794*hi, H=1123*hi;
-  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const cv=document.createElement('canvas'); cv.width=794*hi; cv.height=1123*hi;
   const ctx=cv.getContext('2d'); ctx.scale(hi,hi);
+  paintRules(ctx);
+  return cv;
+}
+
+function paintRules(ctx){
   ctx.fillStyle='#fff'; ctx.fillRect(0,0,794,1123);
 
   const MX=44, BOXW=706, TX=66, TXW=BOXW-(TX-MX)-22; // 內文可用寬度
@@ -760,39 +766,68 @@ function renderRulesPage(hi){
   // 頁尾署名
   ctx.fillStyle='#999'; ctx.font='12px sans-serif'; ctx.textAlign='center';
   ctx.fillText('設計者：愛迪樂　鍾孟修　職能治療師', 397, 1100);
-
-  return cv;
 }
 
-/* ===== 螢幕預覽 ===== */
-function buildPages(){
-  const m = MODES[state.mode];
-  const pagesEl = document.getElementById('pages');
-  pagesEl.innerHTML='';
+/* ===== 螢幕預覽 =====
+   不再用 transform:scale + 負 margin（會造成版面亂跳）。
+   改為依縮放比直接建立對應像素尺寸的 canvas（高 DPI 清晰），
+   並重用既有 canvas 元素，只重畫像素、不重建 DOM。 */
+let _pageMeta = null; // 記錄目前頁數結構，決定是否需要重建 DOM
 
+function computeLayout(){
+  const m = MODES[state.mode];
   const pageData=[];
   for(let i=0;i<CARDS.length;i+=m.perPage) pageData.push(CARDS.slice(i,i+m.perPage));
-
-  const all=[];
-  if(state.showRules){
-    const cv=renderRulesPage(1);
-    all.push(cv);
-  }
-  pageData.forEach((pc,idx)=> all.push(renderCardPage(pc,idx,pageData.length,1)));
-
-  // 縮放比例
+  const pagesEl = document.getElementById('pages');
   const avail = Math.min(pagesEl.clientWidth, 1100) - 8;
   let scale = avail/794; if(scale>1) scale=1;
+  // 種類：rules(可選) + N 張卡片頁
+  const kinds = [];
+  if(state.showRules) kinds.push({type:'rules'});
+  pageData.forEach((pc,idx)=> kinds.push({type:'card', cards:pc, idx, total:pageData.length}));
+  return { scale, kinds, signature: (state.showRules?'R':'') + state.mode + ':' + pageData.length };
+}
 
-  all.forEach(cv=>{
-    cv.className='a4';
-    cv.style.transform=`scale(${scale})`;
-    cv.style.marginBottom = `${(scale-1)*1123}px`;
-    pagesEl.appendChild(cv);
-  });
+function ensureCanvases(layout){
+  const pagesEl = document.getElementById('pages');
+  // 只有「頁數結構」改變時才重建 DOM，避免亂跳
+  if(_pageMeta !== layout.signature){
+    pagesEl.innerHTML='';
+    layout.kinds.forEach(()=>{
+      const cv=document.createElement('canvas');
+      cv.className='a4';
+      pagesEl.appendChild(cv);
+    });
+    _pageMeta = layout.signature;
+  }
+  return pagesEl.querySelectorAll('canvas.a4');
+}
 
-  document.getElementById('modeTitle').textContent='預覽：'+m.name;
-  document.getElementById('scaleInfo').textContent=`畫面已自動縮放至適合螢幕寬度（比例 ${Math.round(scale*100)}%）`;
+function drawInto(cv, kind, scale){
+  // CSS 顯示尺寸（縮放後），canvas 緩衝區用 DPR*額外倍率讓圓點清晰
+  const DPR = Math.max(window.devicePixelRatio||1, 1);
+  const HI = DPR * 1.5; // 螢幕預覽清晰度
+  const cssW = 794*scale, cssH = 1123*scale;
+  cv.style.width  = cssW+'px';
+  cv.style.height = cssH+'px';
+  const bufW = Math.round(cssW*HI), bufH = Math.round(cssH*HI);
+  if(cv.width!==bufW || cv.height!==bufH){ cv.width=bufW; cv.height=bufH; }
+  const ctx = cv.getContext('2d');
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,bufW,bufH);
+  // 將 794x1123 的邏輯座標映射到緩衝區
+  const k = bufW/794;
+  ctx.setTransform(k,0,0,k,0,0);
+  if(kind.type==='rules') paintRules(ctx);
+  else paintCardPage(ctx, kind.cards, kind.idx, kind.total);
+}
+
+function buildPages(){
+  const layout = computeLayout();
+  const canvases = ensureCanvases(layout);
+  layout.kinds.forEach((kind,i)=> drawInto(canvases[i], kind, layout.scale));
+  document.getElementById('modeTitle').textContent='預覽：'+MODES[state.mode].name;
+  document.getElementById('scaleInfo').textContent=`畫面已自動縮放至適合螢幕寬度（比例 ${Math.round(layout.scale*100)}%）`;
 }
 
 /* ===== PDF 匯出（純 Canvas → addImage）===== */
@@ -852,7 +887,8 @@ document.getElementById('showCircleBorder').addEventListener('change',e=>{ state
 document.getElementById('circleBorderWidth').addEventListener('input',e=>{ state.circleBorderWidth=+e.target.value; document.getElementById('cibwVal').textContent=e.target.value+'px'; buildPages(); });
 document.getElementById('pdfBtn').addEventListener('click',exportPDF);
 document.getElementById('menuBtn').addEventListener('click',()=>document.getElementById('panel').classList.toggle('open'));
-window.addEventListener('resize',buildPages);
+let _rzTimer=null;
+window.addEventListener('resize',()=>{ clearTimeout(_rzTimer); _rzTimer=setTimeout(buildPages,120); });
 
 buildColorInputs();
 buildPages();
